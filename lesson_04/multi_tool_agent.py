@@ -3,9 +3,10 @@ import json
 
 from core.ai_client import get_ai_client
 
-# =====================================
+
+# ==========================================
 # 1. INITIALIZE AI PROVIDER
-# =====================================
+# ==========================================
 
 client, MODEL, PROVIDER = get_ai_client()
 
@@ -13,55 +14,29 @@ print(f"\nActive AI provider: {PROVIDER}")
 print(f"Active model: {MODEL}")
 
 
-# =====================================
+# ==========================================
 # 2. ASSISTANT INSTRUCTIONS
-# =====================================
-
+# ==========================================
 
 INSTRUCTIONS = """
-You are an e-commerce customer support agent.
+You are an e-commerce customer support assistant.
 
-You have access to three tools:
+Your responsibility is to answer customers using
+the business information supplied to you.
 
-1. check_inventory:
-   Checks whether a product is available and returns its stock quantity.
-
-2. get_product_price:
-   Retrieves the price of a product in Nigerian Naira.
-
-3. calculate_delivery:
-   Calculates delivery fees for a supported Nigerian city.
-
-IMPORTANT TOOL USAGE RULES:
-
-- If the customer asks whether a product is available,
-  you MUST call check_inventory.
-
-- If the customer asks how much a product costs,
-  you MUST call get_product_price.
-
-- If the customer asks about delivery fees or delivery
-  cost to a city, you MUST call calculate_delivery.
-
-- If the customer asks about multiple things,
-  call ALL tools required to answer the request.
-
-- You may call independent tools together.
-
+Rules:
+- Only use the supplied business information.
 - Never invent prices, stock quantities or delivery fees.
-
-- Only provide business information returned by the tools.
-
-- If a tool reports that information is unavailable,
-  explain that clearly.
-
-- Do not claim that an order has been placed or paid for.
+- If information is unavailable, explain that clearly.
+- Be friendly, professional and concise.
+- Calculate totals correctly when all necessary values exist.
+- Never claim that an order has been placed or paid for.
 """
 
 
-# =====================================
+# ==========================================
 # 3. SAMPLE PRODUCT DATABASE
-# =====================================
+# ==========================================
 
 products = {
     "samsung galaxy s26": {
@@ -69,16 +44,19 @@ products = {
         "price": 1_250_000,
         "stock": 8
     },
+
     "iphone 17 pro": {
         "name": "iPhone 17 Pro",
         "price": 2_100_000,
         "stock": 3
     },
+
     "hp laptop": {
         "name": "HP Laptop",
         "price": 1_800_000,
         "stock": 0
     },
+
     "wireless headphones": {
         "name": "Wireless Headphones",
         "price": 85_000,
@@ -87,9 +65,9 @@ products = {
 }
 
 
-# =====================================
+# ==========================================
 # 4. DELIVERY DATABASE
-# =====================================
+# ==========================================
 
 delivery_rates = {
     "lagos": 3500,
@@ -98,9 +76,9 @@ delivery_rates = {
 }
 
 
-# =====================================
-# 5. PYTHON FUNCTIONS / TOOLS
-# =====================================
+# ==========================================
+# 5. PYTHON BUSINESS FUNCTIONS
+# ==========================================
 
 def check_inventory(product_name: str) -> dict:
 
@@ -154,9 +132,9 @@ def calculate_delivery(city: str) -> dict:
     }
 
 
-# =====================================
+# ==========================================
 # 6. TOOL REGISTRY
-# =====================================
+# ==========================================
 
 available_functions = {
     "check_inventory": check_inventory,
@@ -165,76 +143,17 @@ available_functions = {
 }
 
 
-# =====================================
-# 7. TOOL DEFINITIONS
-# =====================================
-
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "check_inventory",
-            "description": "Check stock availability of a product.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {
-                        "type": "string",
-                        "description": "Exact product name."
-                    }
-                },
-                "required": ["product_name"],
-                "additionalProperties": False
-            },
-            "strict": True
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_product_price",
-            "description": "Retrieve a product price in Nigerian Naira.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {
-                        "type": "string",
-                        "description": "Exact product name."
-                    }
-                },
-                "required": ["product_name"],
-                "additionalProperties": False
-            },
-            "strict": True
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_delivery",
-            "description": "Calculate delivery fee for a supported Nigerian city.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "city": {
-                        "type": "string",
-                        "description": "Customer delivery destination."
-                    }
-                },
-                "required": ["city"],
-                "additionalProperties": False
-            },
-            "strict": True
-        }
-    }
-]
-
-
-# =====================================
-# 8. EXECUTE REQUESTED TOOL
-# =====================================
+# ==========================================
+# 7. VALIDATE AND EXECUTE TOOLS
+# ==========================================
 
 def execute_tool(name: str, arguments: dict) -> dict:
+
+    required_arguments = {
+        "check_inventory": ["product_name"],
+        "get_product_price": ["product_name"],
+        "calculate_delivery": ["city"]
+    }
 
     function = available_functions.get(name)
 
@@ -243,6 +162,19 @@ def execute_tool(name: str, arguments: dict) -> dict:
             "success": False,
             "message": "Unknown tool requested."
         }
+
+    required = required_arguments[name]
+
+    for argument in required:
+
+        value = arguments.get(argument)
+
+        if not isinstance(value, str) or not value.strip():
+
+            return {
+                "success": False,
+                "message": f"Missing or invalid argument: {argument}"
+            }
 
     try:
         return function(**arguments)
@@ -254,88 +186,224 @@ def execute_tool(name: str, arguments: dict) -> dict:
         }
 
 
-# =====================================
-# 9. AGENT LOOP
-# =====================================
+# ==========================================
+# 8. UNDERSTAND CUSTOMER REQUEST
+# ==========================================
 
-def run_agent(user_message: str) -> str:
+def understand_request(message: str) -> dict:
 
-    messages = [
-        {
-            "role": "system",
-            "content": INSTRUCTIONS
-        },
-        {
-            "role": "user",
-            "content": user_message
-        }
+    text = message.lower()
+
+    # Identify the product mentioned by the customer.
+    product_name = None
+
+    for product in products:
+
+        if product in text:
+            product_name = product
+            break
+
+    # Identify the delivery destination.
+    city = None
+
+    for location in delivery_rates:
+
+        if location in text:
+            city = location
+            break
+
+    # Identify requested operations.
+    wants_inventory = any(
+        word in text
+        for word in [
+            "available",
+            "availability",
+            "in stock",
+            "stock",
+            "have"
+        ]
+    )
+
+    wants_price = any(
+        word in text
+        for word in [
+            "price",
+            "cost",
+            "how much",
+            "expensive",
+            "cheaper"
+        ]
+    )
+
+    wants_delivery = any(
+        word in text
+        for word in [
+            "delivery",
+            "deliver",
+            "shipping",
+            "shipping fee",
+            "shipping cost"
+        ]
+    )
+
+    # Build the required operations.
+    requested_tools = []
+
+    if wants_inventory:
+        requested_tools.append("check_inventory")
+
+    if wants_price:
+        requested_tools.append("get_product_price")
+
+    if wants_delivery:
+        requested_tools.append("calculate_delivery")
+
+    return {
+        "product_name": product_name,
+        "city": city,
+        "requested_tools": requested_tools
+    }
+
+
+# ==========================================
+# 9. ORCHESTRATE BUSINESS OPERATIONS
+# ==========================================
+
+def orchestrate_request(message: str) -> dict:
+
+    request = understand_request(message)
+
+    product_name = request["product_name"]
+    city = request["city"]
+
+    requested_tools = request["requested_tools"]
+
+    results = {}
+
+    # Product-related operations require a known product.
+    product_tools = [
+        "check_inventory",
+        "get_product_price"
     ]
 
-    max_tool_rounds = 3
+    for tool_name in requested_tools:
 
-    for round_number in range(max_tool_rounds + 1):
+        if tool_name in product_tools:
 
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            parallel_tool_calls=True,
-            max_tokens=400
+            if not product_name:
+                results[tool_name] = {
+                    "success": False,
+                    "message": "Please specify a product."
+                }
+                continue
+
+            arguments = {
+                "product_name": product_name
+            }
+
+        elif tool_name == "calculate_delivery":
+
+            if not city:
+                results[tool_name] = {
+                    "success": False,
+                    "message": "Please specify a supported delivery city."
+                }
+                continue
+
+            arguments = {
+                "city": city
+            }
+
+        else:
+            continue
+
+        print(f"\nExecuting tool: {tool_name}")
+        print(f"Arguments: {arguments}")
+
+        result = execute_tool(
+            tool_name,
+            arguments
         )
 
-        assistant_message = response.choices[0].message
+        results[tool_name] = result
 
-        # Save the assistant response in conversation history.
-        messages.append(
-            assistant_message.model_dump(exclude_none=True)
+        print(f"Tool result: {result}")
+
+    return results
+
+
+# ==========================================
+# 10. GENERATE CUSTOMER RESPONSE
+# ==========================================
+
+def generate_response(
+    customer_message: str,
+    business_results: dict
+) -> str:
+
+    context = {
+        "customer_message": customer_message,
+        "verified_business_information": business_results
+    }
+
+    response = client.chat.completions.create(
+        model=MODEL,
+
+        messages=[
+            {
+                "role": "system",
+                "content": INSTRUCTIONS
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Answer the customer's request using "
+                    "the following verified information:\n\n"
+                    + json.dumps(context, indent=2)
+                )
+            }
+        ],
+
+        max_tokens=300
+    )
+
+    return response.choices[0].message.content
+
+
+# ==========================================
+# 11. MAIN AGENT FUNCTION
+# ==========================================
+
+def run_agent(customer_message: str) -> str:
+
+    # Step 1: Understand the request.
+    request = understand_request(customer_message)
+
+    # Step 2: Check whether we identified any operations.
+    if not request["requested_tools"]:
+
+        return (
+            "Could you clarify whether you need product "
+            "availability, pricing or delivery information?"
         )
 
-        # If the model has no more tool calls, return its answer.
-        if not assistant_message.tool_calls:
-            return assistant_message.content or "No response generated."
+    # Step 3: Execute required business operations.
+    results = orchestrate_request(customer_message)
 
-        if round_number == max_tool_rounds:
-            return "The agent reached its maximum tool-call rounds."
-
-        print(f"\n--- TOOL ROUND {round_number + 1} ---")
-
-        # Execute every requested tool.
-        for tool_call in assistant_message.tool_calls:
-
-            tool_name = tool_call.function.name
-
-            arguments = json.loads(
-                tool_call.function.arguments
-            )
-
-            print(f"AI requested: {tool_name}")
-            print(f"Arguments: {arguments}")
-
-            result = execute_tool(
-                tool_name,
-                arguments
-            )
-
-            print(f"Tool result: {result}")
-
-            # Return tool result to the model.
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(result)
-            })
-
-    return "Unable to complete the request."
+    # Step 4: Generate the final customer response.
+    return generate_response(
+        customer_message,
+        results
+    )
 
 
-# =====================================
-# 10. RUN APPLICATION
-# =====================================
+# ==========================================
+# 12. RUN APPLICATION
+# ==========================================
 
 if __name__ == "__main__":
 
-    print("\nE-COMMERCE AI AGENT")
+    print("\nE-COMMERCE AI ASSISTANT")
     print("Type 'exit' to stop.\n")
 
     while True:
@@ -343,7 +411,8 @@ if __name__ == "__main__":
         message = input("Customer: ").strip()
 
         if message.lower() in ["exit", "quit"]:
-            print("Agent: Goodbye!")
+
+            print("\nAssistant: Goodbye!")
             break
 
         if not message:
@@ -358,4 +427,5 @@ if __name__ == "__main__":
             print()
 
         except Exception as error:
+
             print(f"\nApplication error: {error}\n")
