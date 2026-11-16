@@ -1,39 +1,66 @@
 
-import os
 import json
 
-from dotenv import load_dotenv
-from openai import OpenAI
+from core.ai_client import get_ai_client
 
 # =====================================
-# 1. CONFIGURATION
+# 1. INITIALIZE AI PROVIDER
 # =====================================
 
-load_dotenv()
+client, MODEL, PROVIDER = get_ai_client()
 
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+print(f"\nActive AI provider: {PROVIDER}")
+print(f"Active model: {MODEL}")
 
-MODEL = "gpt-5.5"
+
+# =====================================
+# 2. ASSISTANT INSTRUCTIONS
+# =====================================
+
 
 INSTRUCTIONS = """
 You are an e-commerce customer support agent.
 
-You can check product inventory, retrieve prices,
-and calculate delivery fees.
+You have access to three tools:
 
-Rules:
-- Use tools whenever the customer asks for business information.
+1. check_inventory:
+   Checks whether a product is available and returns its stock quantity.
+
+2. get_product_price:
+   Retrieves the price of a product in Nigerian Naira.
+
+3. calculate_delivery:
+   Calculates delivery fees for a supported Nigerian city.
+
+IMPORTANT TOOL USAGE RULES:
+
+- If the customer asks whether a product is available,
+  you MUST call check_inventory.
+
+- If the customer asks how much a product costs,
+  you MUST call get_product_price.
+
+- If the customer asks about delivery fees or delivery
+  cost to a city, you MUST call calculate_delivery.
+
+- If the customer asks about multiple things,
+  call ALL tools required to answer the request.
+
+- You may call independent tools together.
+
 - Never invent prices, stock quantities or delivery fees.
-- If a product is unavailable, clearly explain that.
-- Combine information from multiple tools when necessary.
-- Only answer using information returned by the tools.
+
+- Only provide business information returned by the tools.
+
+- If a tool reports that information is unavailable,
+  explain that clearly.
+
 - Do not claim that an order has been placed or paid for.
 """
 
+
 # =====================================
-# 2. SAMPLE PRODUCT DATABASE
+# 3. SAMPLE PRODUCT DATABASE
 # =====================================
 
 products = {
@@ -59,8 +86,9 @@ products = {
     }
 }
 
+
 # =====================================
-# 3. DELIVERY DATABASE
+# 4. DELIVERY DATABASE
 # =====================================
 
 delivery_rates = {
@@ -69,8 +97,9 @@ delivery_rates = {
     "port harcourt": 4500
 }
 
+
 # =====================================
-# 4. PYTHON TOOLS
+# 5. PYTHON FUNCTIONS / TOOLS
 # =====================================
 
 def check_inventory(product_name: str) -> dict:
@@ -126,68 +155,8 @@ def calculate_delivery(city: str) -> dict:
 
 
 # =====================================
-# 5. REGISTER AVAILABLE TOOLS
-# =====================================
-
-tools = [
-    {
-        "type": "function",
-        "name": "check_inventory",
-        "description": "Check the stock availability of a product.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "product_name": {
-                    "type": "string",
-                    "description": "Exact product name."
-                }
-            },
-            "required": ["product_name"],
-            "additionalProperties": False
-        },
-        "strict": True
-    },
-    {
-        "type": "function",
-        "name": "get_product_price",
-        "description": "Retrieve the current price of a product in NGN.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "product_name": {
-                    "type": "string",
-                    "description": "Exact product name."
-                }
-            },
-            "required": ["product_name"],
-            "additionalProperties": False
-        },
-        "strict": True
-    },
-    {
-        "type": "function",
-        "name": "calculate_delivery",
-        "description": "Calculate delivery fee for a supported Nigerian city.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "city": {
-                    "type": "string",
-                    "description": "Customer delivery destination."
-                }
-            },
-            "required": ["city"],
-            "additionalProperties": False
-        },
-        "strict": True
-    }
-]
-
-# =====================================
 # 6. TOOL REGISTRY
 # =====================================
-
-# Connect the tool names to actual Python functions.
 
 available_functions = {
     "check_inventory": check_inventory,
@@ -197,7 +166,72 @@ available_functions = {
 
 
 # =====================================
-# 7. EXECUTE A TOOL CALL
+# 7. TOOL DEFINITIONS
+# =====================================
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "check_inventory",
+            "description": "Check stock availability of a product.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {
+                        "type": "string",
+                        "description": "Exact product name."
+                    }
+                },
+                "required": ["product_name"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_product_price",
+            "description": "Retrieve a product price in Nigerian Naira.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {
+                        "type": "string",
+                        "description": "Exact product name."
+                    }
+                },
+                "required": ["product_name"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_delivery",
+            "description": "Calculate delivery fee for a supported Nigerian city.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "Customer delivery destination."
+                    }
+                },
+                "required": ["city"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+    }
+]
+
+
+# =====================================
+# 8. EXECUTE REQUESTED TOOL
 # =====================================
 
 def execute_tool(name: str, arguments: dict) -> dict:
@@ -221,80 +255,82 @@ def execute_tool(name: str, arguments: dict) -> dict:
 
 
 # =====================================
-# 8. AGENT LOOP
+# 9. AGENT LOOP
 # =====================================
 
 def run_agent(user_message: str) -> str:
 
-    response = client.responses.create(
-        model=MODEL,
-        instructions=INSTRUCTIONS,
-        input=user_message,
-        tools=tools,
-        tool_choice="auto",
-        parallel_tool_calls=True,
-        max_output_tokens=300
-    )
+    messages = [
+        {
+            "role": "system",
+            "content": INSTRUCTIONS
+        },
+        {
+            "role": "user",
+            "content": user_message
+        }
+    ]
 
-    # Limit additional tool rounds.
     max_tool_rounds = 3
 
-    for round_number in range(max_tool_rounds):
+    for round_number in range(max_tool_rounds + 1):
 
-        # Find all requested function calls.
-        function_calls = [
-            item for item in response.output
-            if item.type == "function_call"
-        ]
-
-        # No more tools requested.
-        if not function_calls:
-            return response.output_text
-
-        print(f"\n--- TOOL ROUND {round_number + 1} ---")
-
-        tool_outputs = []
-
-        # Execute every requested function.
-        for call in function_calls:
-
-            arguments = json.loads(call.arguments)
-
-            print(f"AI requested: {call.name}")
-            print(f"Arguments: {arguments}")
-
-            result = execute_tool(
-                call.name,
-                arguments
-            )
-
-            print(f"Result: {result}")
-
-            tool_outputs.append({
-                "type": "function_call_output",
-                "call_id": call.call_id,
-                "output": json.dumps(result)
-            })
-
-        # Send the tool results back to the model.
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=MODEL,
-            instructions=INSTRUCTIONS,
-            input=[
-                *response.output,
-                *tool_outputs
-            ],
+            messages=messages,
             tools=tools,
             tool_choice="auto",
             parallel_tool_calls=True,
-            max_output_tokens=300
+            max_tokens=400
         )
 
-    return "The agent reached its maximum tool-call rounds."
+        assistant_message = response.choices[0].message
+
+        # Save the assistant response in conversation history.
+        messages.append(
+            assistant_message.model_dump(exclude_none=True)
+        )
+
+        # If the model has no more tool calls, return its answer.
+        if not assistant_message.tool_calls:
+            return assistant_message.content or "No response generated."
+
+        if round_number == max_tool_rounds:
+            return "The agent reached its maximum tool-call rounds."
+
+        print(f"\n--- TOOL ROUND {round_number + 1} ---")
+
+        # Execute every requested tool.
+        for tool_call in assistant_message.tool_calls:
+
+            tool_name = tool_call.function.name
+
+            arguments = json.loads(
+                tool_call.function.arguments
+            )
+
+            print(f"AI requested: {tool_name}")
+            print(f"Arguments: {arguments}")
+
+            result = execute_tool(
+                tool_name,
+                arguments
+            )
+
+            print(f"Tool result: {result}")
+
+            # Return tool result to the model.
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps(result)
+            })
+
+    return "Unable to complete the request."
 
 
 # =====================================
-# 9. RUN APPLICATION
+# 10. RUN APPLICATION
 # =====================================
 
 if __name__ == "__main__":
@@ -314,6 +350,7 @@ if __name__ == "__main__":
             continue
 
         try:
+
             answer = run_agent(message)
 
             print("\nAI Agent:")
